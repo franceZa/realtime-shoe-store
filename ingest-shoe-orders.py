@@ -5,14 +5,6 @@ config.read("config.cfg")
 
 # COMMAND ----------
 
-#%fs rm -r dbfs:/mnt/demo/checkpoints/shoe_orders_raw
-
-# COMMAND ----------
-
-#%fs rm -r /mnt/datalake/shoe_orders_data
-
-# COMMAND ----------
-
 from pyspark.sql import SparkSession
 import pyspark.sql.functions as fn
 from pyspark.sql.types import StringType
@@ -67,18 +59,29 @@ thai_time_zone = "Asia/Bangkok"
 
 divide_unix_time = lambda x: x /1000 # unix time from sourse this *1000
 
+# Parse the clickstream data
 parsed_df = clickstreamTestDf \
      .selectExpr("CAST(key AS STRING)", "CAST(value AS STRING)") \
      .select(from_json(col("value"), json_schema).alias("data")) \
      .select("data.*") \
      .withColumnRenamed("ts", "ts_unix") \
-     .withColumn('ts', from_unixtime(divide_unix_time(col('ts_unix').cast("long" )), 'yyyy-MM-dd HH:mm:ss')) \
-     .withColumn("ts", from_utc_timestamp(col("ts"), thai_time_zone)) \
-     .withColumn("arrive_dt_utc", from_unixtime(current_timestamp().cast("long"))) \
+     .withColumn("ts_unix", col('ts_unix').cast("double")) \
+     .withColumn("ts", from_utc_timestamp(from_unixtime(divide_unix_time(col('ts_unix')), 'yyyy-MM-dd HH:mm:ss'), thai_time_zone)) \
+     .dropDuplicates(["order_id"]) \
+    .withColumn("arrive_dt_utc", from_unixtime(current_timestamp().cast("double"))) \
      .withColumn("arrive_dt", from_utc_timestamp(col("arrive_dt_utc"), thai_time_zone)) \
      .drop("arrive_dt_utc","ts_unix") \
-     .dropDuplicates(["order_id"]) \
      .createOrReplaceTempView(f'stream_data_{tablename}')
+
+    #  .withColumn("arrive_dt_utc", from_unixtime(current_timestamp().cast("double"))) \
+    #  .withColumn("arrive_dt", from_utc_timestamp(col("arrive_dt_utc"), thai_time_zone)) \
+     #  .withColumn('ts', from_unixtime(divide_unix_time(col('ts_unix').cast("double")), 'yyyy-MM-dd HH:mm:ss') ) \
+     #.drop("arrive_dt_utc","ts_unix") \
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT * from stream_data_shoe_orders
 
 # COMMAND ----------
 
@@ -103,6 +106,10 @@ parsed_df = clickstreamTestDf \
 # COMMAND ----------
 
 #%fs rm -r /mnt/datalake/
+
+# COMMAND ----------
+
+#%fs ls /mnt/datalake/
 
 # COMMAND ----------
 
@@ -152,8 +159,9 @@ parsed_df = clickstreamTestDf \
     .format("delta")
     .outputMode("complete") # rewrite each time keep in mind that upstreaming data pipe is only append logic to stream table so it need to rewrite
     .option("checkpointLocation", f"dbfs:/mnt/demo/checkpoints/{tablename}_table")
-    .trigger(once=True) # batch jobs
     .table(tablename))
+
+        #.trigger(once=True) 
 
 # COMMAND ----------
 
@@ -195,11 +203,11 @@ parsed_df = clickstreamTestDf \
 
 # COMMAND ----------
 
-# MAGIC %python
-# MAGIC for s in spark.streams.active:
-# MAGIC   print("Stopping stream: " + s.id)
-# MAGIC   s.stop()
-# MAGIC   s.awaitTermination()
+# %python
+# for s in spark.streams.active:
+#   print("Stopping stream: " + s.id)
+#   s.stop()
+#   s.awaitTermination()
 
 # COMMAND ----------
 

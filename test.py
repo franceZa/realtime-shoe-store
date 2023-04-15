@@ -126,7 +126,6 @@ parsed_df = clickstreamTestDf \
     .format("delta")
     .outputMode("complete") # rewrite each time keep in mind that upstreaming data pipe is only append logic to stream table so it need to rewrite
     .option("checkpointLocation", f"dbfs:/mnt/demo/checkpoints/{tablename}_table")
-    .trigger(once=True) # batch jobs
     .table(tablename))
 
 # COMMAND ----------
