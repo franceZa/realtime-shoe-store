@@ -12,6 +12,14 @@ The architecture of the real-time shoes store demo project consists of the follo
 
 * Delta Lake: A data lake that stores the processed clickstream and orders transaction data as a batch and stream unified view.
 
+### Multihop Architecture
+
+![image](https://user-images.githubusercontent.com/50670756/232196113-8d6a9601-6a91-4ef4-9e0c-b3dd103de95e.png)
+
+### ER Diagram (ERD)
+
+![image](https://user-images.githubusercontent.com/50670756/232196163-aaebe56f-8d92-4ff6-9626-efe992bb5467.png)
+
 ## How It Works
 The shoes store demo project works as follows:
 
