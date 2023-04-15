@@ -68,29 +68,19 @@ thai_time_zone = "Asia/Bangkok"
 
 divide_unix_time = lambda x: x /1000 # unix time from sourse this *1000
 
+# Parse the clickstream data
 parsed_df = clickstreamTestDf \
      .selectExpr("CAST(key AS STRING)", "CAST(value AS STRING)") \
      .select(from_json(col("value"), json_schema).alias("data")) \
      .select("data.*") \
      .withColumnRenamed("ts", "ts_unix") \
-     .withColumn('ts', from_unixtime(divide_unix_time(col('ts_unix').cast("long")), 'yyyy-MM-dd HH:mm:ss')) \
-     .withColumn("ts", from_utc_timestamp(col("ts"), thai_time_zone)) \
-     .withColumn("arrive_dt_utc", from_unixtime(current_timestamp().cast("long"))) \
+     .withColumn("ts_unix", col('ts_unix').cast("double")) \
+     .withColumn("ts", from_utc_timestamp(from_unixtime(divide_unix_time(col('ts_unix')), 'yyyy-MM-dd HH:mm:ss'), thai_time_zone)) \
+      .withColumn("arrive_dt_utc", from_unixtime(current_timestamp().cast("double"))) \
      .withColumn("arrive_dt", from_utc_timestamp(col("arrive_dt_utc"), thai_time_zone)) \
-     .drop("arrive_dt_utc","ts_unix") \
+    .drop("arrive_dt_utc","ts_unix") \
      .createOrReplaceTempView(f'stream_data_{tablename}')
 
-
-
-
-# convert_time
-#      .withColumn("ts", col("ts").cast("long")) \
-#      .withColumn("ts_utc", from_unixtime("ts")) \
-#      .withColumn("ts", from_utc_timestamp(col("ts_utc"), thai_time_zone)) \
-#      .withColumn("arrive_dt_utc", from_unixtime(current_timestamp().cast("long"))) \
-#      .withColumn("arrive_dt", from_utc_timestamp(col("arrive_dt_utc"), thai_time_zone)) \
-#      .drop("ts_utc", "arrive_dt_utc") \
-    
 
 # COMMAND ----------
 
@@ -137,16 +127,15 @@ parsed_df = clickstreamTestDf \
     .format("delta")
     .outputMode("complete") # rewrite each time keep in mind that upstreaming data pipe is only append logic to stream table so it need to rewrite
     .option("checkpointLocation", f"dbfs:/mnt/demo/checkpoints/{tablename}_table")
-    .trigger(once=True) # batch jobs
     .table(tablename))
 
 # COMMAND ----------
 
-# MAGIC %python
-# MAGIC for s in spark.streams.active:
-# MAGIC   print("Stopping stream: " + s.id)
-# MAGIC   s.stop()
-# MAGIC   s.awaitTermination()
+# %python
+# for s in spark.streams.active:
+#   print("Stopping stream: " + s.id)
+#   s.stop()
+#   s.awaitTermination()
 
 # COMMAND ----------
 

@@ -47,10 +47,10 @@
 -- COMMAND ----------
 
 -- MAGIC %python
--- MAGIC columns_statement = get_col_name(table_name = ['shoe_clickstream','shoes'],perfix = ['cs','c'] ,except_col = ['arrive_dt'])
+-- MAGIC columns_statement = get_col_name(table_name = ['shoe_clickstream','shoes'],perfix = ['cs','s'] ,except_col = ['arrive_dt'])
 -- MAGIC print(columns_statement)
 -- MAGIC 
--- MAGIC qeury_cust_click_stream_history = f'''CREATE OR REPLACE temp view cust_click_stream_history
+-- MAGIC qeury_cust_click_stream_history = f'''CREATE OR REPLACE table cust_click_stream_history
 -- MAGIC AS (
 -- MAGIC   SELECT {columns_statement}, 
 -- MAGIC          DATEDIFF(hour, cs.ts, current_timestamp()) as hours_since_timestamp,
@@ -140,15 +140,10 @@
 
 -- MAGIC %sql
 -- MAGIC -- top sell 
--- MAGIC CREATE OR REPLACE VIEW top_sell_product AS (
+-- MAGIC CREATE OR REPLACE VIEW top_sell_product_all_time AS (
 -- MAGIC select shoes_id, brand, name, sale_price, rating, sum(1) as total_sales
 -- MAGIC       from orders_transction
--- MAGIC       group by shoes_id, brand, sale_price, rating)
-
--- COMMAND ----------
-
--- MAGIC %sql
--- MAGIC SELECT * from top_sell_product
+-- MAGIC       group by shoes_id, brand, name, sale_price, rating)
 
 -- COMMAND ----------
 
@@ -157,44 +152,108 @@
 
 -- COMMAND ----------
 
-select * from cust_click_stream_history
+select * FROM cust_click_stream_history
 
 -- COMMAND ----------
 
+-- most view and buy shoes brand
+-- view time and they bougth
+
+-- COMMAND ----------
+
+
+CREATE OR REPLACE table  customer_interact_before_buy AS (
+with a AS (
+    SELECT 
+    customer_id,
+    order_id,
+    product_id,
+    DATE_FORMAT(ts, 'yyyy-MM-dd HH:mm:ss') as ts,
+    LAG(DATE_FORMAT(ts, 'yyyy-MM-dd HH:mm:ss')) OVER (PARTITION BY customer_id ORDER BY ts ASC) AS prev_odr_ts
+    FROM 
+        shoe_orders
+    GROUP BY 
+        customer_id, order_id, product_id, ts
+    ORDER BY 
+        customer_id, ts DESC ),
+  b AS (
+    SELECT 
+      cs.* 
+    FROM cust_click_stream_history cs
+    ),
+  c AS (
+    select a.*,b.* 
+    from a 
+    join b on a.product_id = b.shoes_id and a.customer_id = b.user_id 
+    --where a.ts > b.shoe_clickstream_ts
+    )
+    SELECT 
+    customer_id,
+    order_id, 
+    sum (case when shoe_clickstream_ts between  COALESCE(prev_odr_ts, '1900-01-01')  and ts then 1 else 0 end ) as interact_count_before_buy, -- sum customer that interaction time with product before buy
+    sum (case when shoe_clickstream_ts between  COALESCE(prev_odr_ts, '1900-01-01')  and ts then view_time else 0 end ) as view_duration_before_buy
+  from c group by customer_id,order_id
+)
+
+
+-- COMMAND ----------
+
+-- SELECT 
+--     customer_id,
+--     order_id,
+--     product_id,
+--     DATE_FORMAT(ts, 'yyyy-MM-dd HH:mm:ss') as ts,
+--     LAG(DATE_FORMAT(ts, 'yyyy-MM-dd HH:mm:ss')) OVER (PARTITION BY customer_id ORDER BY ts ASC) AS prev_odr_ts
+-- FROM 
+--     shoe_orders
+-- GROUP BY 
+--     customer_id, order_id,product_id, ts
+-- ORDER BY 
+--     customer_id, ts DESC
+
+-- COMMAND ----------
+
+-- with a AS (
+--     SELECT 
+--     customer_id,order_id,ts, LAG(ts) OVER (ORDER BY ts) AS prev_odr_ts
+--     FROM shoe_orders so  group by customer_id,order_id,ts),
+--   b AS (
+--     SELECT 
+--       cs.* 
+--     FROM cust_click_stream_history cs
+--     ),
+--   c AS (
+--     select a.*,b.* 
+--     from a 
+--     join b on a.product_id = b.shoes_id and a.customer_id = b.user_id 
+--     --where a.ts > b.shoe_clickstream_ts
+--     )
+-- SELECT order_id,ts,prev_odr_ts,shoe_clickstream_ts from c where customer_id = '3e473d17-edeb-4d0e-9acf-c1441326d119' and shoe_clickstream_ts between  COALESCE(prev_odr_ts, '1900-01-01')  and ts
+
+-- COMMAND ----------
+
+-- MAGIC %python
+-- MAGIC 
+-- MAGIC 
+-- MAGIC columns_statement = get_col_name(table_name = ['customers'],perfix = ['c'] ,except_col = ['arrive_dt'])
+-- MAGIC print(columns_statement)
+
+-- COMMAND ----------
+
+CREATE OR REPLACE table  customer_feature AS (
 with 
   click_info as ( 
       SELECT 
         ch.user_id,
-        ch.brand AS most_interest_brand,
-        ROW_NUMBER() OVER (PARTITION BY ch.user_id ORDER BY buy_count DESC) AS row_num
+        ch.brand AS most_interaction_brand,
+        ROW_NUMBER() OVER (PARTITION BY ch.user_id ORDER BY average_view_duration DESC) AS row_num
       FROM (
         SELECT 
           user_id,
           brand,
-          SUM(buy_count) AS buy_count
-        FROM 
-          cust_click_stream_history
-        GROUP BY 
-          user_id,
-          brand
-      ) ch
-        )
-select * from click_info
-
--- COMMAND ----------
-
--- fix the most purchased brand for each user
-with 
-  click_info as ( 
-      SELECT 
-        ch.user_id,
-        ch.brand AS most_interest_brand,
-        ROW_NUMBER() OVER (PARTITION BY ch.user_id ORDER BY buy_count DESC) AS row_num
-      FROM (
-        SELECT 
-          user_id,
-          brand,
-          SUM(buy_count) AS buy_count
+          SUM(1) AS view_count,
+          SUM(view_time) AS total_view_times,
+          SUM(view_time)/sum(1) as average_view_duration
         FROM 
           cust_click_stream_history
         GROUP BY 
@@ -202,31 +261,32 @@ with
           brand
       ) ch
         ),
-  enrich_click as (  --find to user interest product
+  enrich_click_most_interest_brand as (  --find to user interest product
         SELECT  
          *
         FROM click_info 
         PIVOT (
-          min(most_interest_brand)
+          min(most_interaction_brand)
           FOR row_num in (
-           1 most_interest_brand,2 second_interest_brand
+           1 most_interaction_brand,2 second_interaction_brand
           )
         )
         ORDER BY user_id DESC
                ),
-  order_info as (
-      select 
-      ch.user_id, 
-      sum(ch.total_view_time) as total_view_time, 
-      sum(ch.click_count) as click_count, 
-      sum(ch.buy_count) as total_buy 
-      from cust_intent_history ch
-      group by ch.user_id
+  click_before_buy as (
+    -- calulat avg view duration before buy items
+      SELECT 
+        customer_id, 
+        SUM(view_duration_before_buy) / SUM(interact_count_before_buy) AS avg_view_duration_before_buy
+      FROM customer_interact_before_buy 
+      GROUP BY customer_id
   )
-select lc.*, ec.most_interest_brand, ec.second_interest_brand, oi.total_view_time, oi.click_count, oi.total_buy 
-from enrich_latest_click lc
-join enrich_click ec on lc.user_id = ec.user_id
-join order_info oi on lc.user_id = oi.user_id
+select cb.*,eb.*, c.first_name, c.last_name, c.email, c.phone, c.street_address, c.state, c.zip_code, c.country, c.country_code
+from click_before_buy cb 
+left join enrich_click_most_interest_brand eb on cb.customer_id = eb.user_id
+left join customers c on cb.customer_id = c.id
+)
+--select * from enrich_click_most_interest_brand
 
 -- COMMAND ----------
 
