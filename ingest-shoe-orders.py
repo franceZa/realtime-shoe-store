@@ -5,11 +5,11 @@ config.read("config.cfg")
 
 # COMMAND ----------
 
-# %fs rm -r dbfs:/mnt/demo/checkpoints/shoe_clickstream_bronze
+#%fs rm -r dbfs:/mnt/demo/checkpoints/shoe_orders_raw
 
 # COMMAND ----------
 
-# %fs rm -r /mnt/datalake/shoe_clickstream_bronze
+#%fs rm -r /mnt/datalake/shoe_orders_data
 
 # COMMAND ----------
 
@@ -17,14 +17,13 @@ from pyspark.sql import SparkSession
 import pyspark.sql.functions as fn
 from pyspark.sql.types import StringType
 
-binary_to_string = fn.udf(lambda x: str(int.from_bytes(x, byteorder='big')), StringType())
 
 confluentApiKey= config.get("SHOES-STORE","confluentApiKey")
 confluentSecret= config.get("SHOES-STORE","confluentSecret")
-confluentTopicName =  config.get("SHOES-STORE","TopicName_clickstream")
+confluentTopicName =  config.get("SHOES-STORE","TopicName_shoe_orders")
 Bootstrap_server = config.get("SHOES-STORE","bootstrap_server")
 
-tablename = "shoe_clickstream"
+tablename = "shoe_orders"
 
 
 spark = SparkSession.builder \
@@ -73,29 +72,41 @@ parsed_df = clickstreamTestDf \
      .select(from_json(col("value"), json_schema).alias("data")) \
      .select("data.*") \
      .withColumnRenamed("ts", "ts_unix") \
-     .withColumn('ts', from_unixtime(divide_unix_time(col('ts_unix').cast("long")), 'yyyy-MM-dd HH:mm:ss')) \
+     .withColumn('ts', from_unixtime(divide_unix_time(col('ts_unix').cast("long" )), 'yyyy-MM-dd HH:mm:ss')) \
      .withColumn("ts", from_utc_timestamp(col("ts"), thai_time_zone)) \
      .withColumn("arrive_dt_utc", from_unixtime(current_timestamp().cast("long"))) \
      .withColumn("arrive_dt", from_utc_timestamp(col("arrive_dt_utc"), thai_time_zone)) \
      .drop("arrive_dt_utc","ts_unix") \
+     .dropDuplicates(["order_id"]) \
      .createOrReplaceTempView(f'stream_data_{tablename}')
 
+# COMMAND ----------
 
-
-
+#.createOrReplaceTempView("checking_order")
 # convert_time
 #      .withColumn("ts", col("ts").cast("long")) \
 #      .withColumn("ts_utc", from_unixtime("ts")) \
 #      .withColumn("ts", from_utc_timestamp(col("ts_utc"), thai_time_zone)) \
 #      .withColumn("arrive_dt_utc", from_unixtime(current_timestamp().cast("long"))) \
 #      .withColumn("arrive_dt", from_utc_timestamp(col("arrive_dt_utc"), thai_time_zone)) \
-#      .drop("ts_utc", "arrive_dt_utc") \
-    
+#      .drop("ts_utc", "arrive_dt_utc") 
 
 # COMMAND ----------
 
 # MAGIC %md 
 # MAGIC ### Store to bronze table
+
+# COMMAND ----------
+
+#%fs rm -r /mnt/demo/checkpoints
+
+# COMMAND ----------
+
+#%fs rm -r /mnt/datalake/
+
+# COMMAND ----------
+
+# write to extenal
 
 # COMMAND ----------
 
@@ -108,7 +119,6 @@ parsed_df = clickstreamTestDf \
 # MAGIC for col in columns:
 # MAGIC     schema_dict[col.name] = col.dataType
 # MAGIC 
-# MAGIC # Define a query to aggregate the streaming data
 # MAGIC string_log = ','
 # MAGIC arr_of_columns_name = []
 # MAGIC arr_of_columns_name_groupby = []
@@ -132,6 +142,11 @@ parsed_df = clickstreamTestDf \
 
 # COMMAND ----------
 
+# %sql 
+# SELECT * from stream_data_shoe_orders_view
+
+# COMMAND ----------
+
 (spark.table(f"stream_data_{tablename}_view")
     .writeStream
     .format("delta")
@@ -139,6 +154,44 @@ parsed_df = clickstreamTestDf \
     .option("checkpointLocation", f"dbfs:/mnt/demo/checkpoints/{tablename}_table")
     .trigger(once=True) # batch jobs
     .table(tablename))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC The main difference between .trigger(availableNow=True) and .trigger(once=True) is how the stream is started and how it processes data.
+# MAGIC 
+# MAGIC .trigger(availableNow=True) starts the stream processing as soon as possible, without waiting for new data to arrive. It processes all the available data in the input source and then stops. This is useful in scenarios where you want to process all the available data in one go, such as in a batch job.
+# MAGIC 
+# MAGIC .trigger(once=True) starts the stream processing once and then continues processing any new data as it arrives, without stopping. This is useful in scenarios where you want to process data in real-time or near real-time as it becomes available, such as in a streaming job.
+# MAGIC 
+# MAGIC In summary, .trigger(availableNow=True) is suitable for batch processing, where you want to process all the available data at once, while .trigger(once=True) is suitable for streaming processing, where you want to process data in real-time or near real-time as it becomes available.
+
+# COMMAND ----------
+
+# MAGIC %sql 
+# MAGIC SELECT order_id from stream_data_shoe_orders_view
+# MAGIC minus 
+# MAGIC SELECT order_id from shoe_orders
+
+# COMMAND ----------
+
+# MAGIC %sql 
+# MAGIC select * from stream_data_shoe_orders_view where order_id =  969578
+
+# COMMAND ----------
+
+# MAGIC %sql 
+# MAGIC select * from shoe_orders  where order_id =  969578
+
+# COMMAND ----------
+
+# (spark.table(f"stream_data_{tablename}_view")
+#     .writeStream
+#     .format("delta")
+#     .outputMode("append") # rewrite each time keep in mind that upstreaming data pipe is only append logic to stream table so it need to rewrite
+#     .option("checkpointLocation", f"dbfs:/mnt/demo/checkpoints/{tablename}_realtime_table")
+#     .trigger(availableNow=True) # batch jobs
+#     .table(tablename+'_realtime'))
 
 # COMMAND ----------
 

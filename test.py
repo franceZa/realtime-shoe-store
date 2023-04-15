@@ -1,15 +1,24 @@
 # Databricks notebook source
+!pip install configparser
+
+# COMMAND ----------
+
 import configparser
 config = configparser.ConfigParser()
 config.read("config.cfg")
 
 # COMMAND ----------
 
-# MAGIC %fs rm -r dbfs:/mnt/demo/checkpoints/customers_raw
+# MAGIC %fs rm -r dbfs:/mnt/demo/checkpoints/shoes_raw_test
 
 # COMMAND ----------
 
-# MAGIC %fs rm -r /mnt/datalake/customers_data
+# MAGIC %fs rm -r /mnt/datalake/shoes_data_test
+
+# COMMAND ----------
+
+# %sql
+# drop table shoes_test
 
 # COMMAND ----------
 
@@ -21,10 +30,10 @@ binary_to_string = fn.udf(lambda x: str(int.from_bytes(x, byteorder='big')), Str
 
 confluentApiKey= config.get("SHOES-STORE","confluentApiKey")
 confluentSecret= config.get("SHOES-STORE","confluentSecret")
-confluentTopicName =  config.get("SHOES-STORE","TopicName_customers")
+confluentTopicName =  "dummy-test"
 Bootstrap_server = config.get("SHOES-STORE","bootstrap_server")
-tablename = "customers"
 
+tablename = 'shoes_test'
 
 spark = SparkSession.builder \
     .appName(f"KafkaStream-{tablename}") \
@@ -66,21 +75,11 @@ parsed_df = clickstreamTestDf \
      .selectExpr("CAST(key AS STRING)", "CAST(value AS STRING)") \
      .select(from_json(col("value"), json_schema).alias("data")) \
      .select("data.*") \
-     .withColumn("arrive_dt", from_unixtime(current_timestamp().cast("long")).cast('timestamp')) \
-     .createOrReplaceTempView(f'stream_data_{tablename}')
-        
-# .withColumn("arrive_dt", from_utc_timestamp(col("arrive_dt_utc"), thai_time_zone)) \
-# .drop( "arrive_dt_utc")\
-# .dropDuplicates(["id"])
+     .withColumn("arrive_dt_utc", from_unixtime(current_timestamp().cast("long"))) \
+     .withColumn("arrive_dt", from_utc_timestamp(col("arrive_dt_utc"), thai_time_zone)) \
+     .drop( "arrive_dt_utc").createOrReplaceTempView(f'stream_data_{tablename}')
 
-#.table("shoes")
-#     .select([col(column_names[i]).cast(data_types[i]).alias(column_names[i]) for i in range(len(column_names))])\
-#.drop("ts_utc", "arrive_dt_utc") \     
-#.withColumn("arrive_dt_utc", from_unixtime(current_timestamp().cast("long"))) \
-#.withColumn("arrive_dt", from_utc_timestamp(col("arrive_dt_utc"), thai_time_zone)) \
-#.withColumn("arrive_dt_utc", from_unixtime(current_timestamp().cast("long"))) \
-#.withColumn("arrive_dt", to_date(from_utc_timestamp(col("arrive_dt_utc"), thai_time_zone))) \
-
+     
 
 # COMMAND ----------
 
