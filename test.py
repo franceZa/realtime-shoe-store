@@ -121,12 +121,30 @@ parsed_df = clickstreamTestDf \
 
 # COMMAND ----------
 
+# MAGIC %fs rm -r /mnt/demo/checkpoints
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC select * FROM  stream_data_shoes_test_view
+
+# COMMAND ----------
+
 (spark.table(f"stream_data_{tablename}_view")
     .writeStream
     .format("delta")
     .outputMode("complete") # rewrite each time keep in mind that upstreaming data pipe is only append logic to stream table so it need to rewrite
     .option("checkpointLocation", f"dbfs:/mnt/demo/checkpoints/{tablename}_table")
     .table(tablename))
+
+# COMMAND ----------
+
+   # .trigger(once=True) # batch jobs
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC select * FROM  shoes_test
 
 # COMMAND ----------
 
